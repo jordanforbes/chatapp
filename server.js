@@ -5,14 +5,22 @@ const http = require("http");
 const socketIo = require("socket.io");
 const mongoose = require("mongoose");
 const session = require("express-session");
-const RedisStore = require("connect-redis").default;
+const RedisStore = require("connect-redis")(session);
 const redis = require("redis");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const path = require("path");
 
 const app = express(); //initialize express app
 const server = http.createServer(app); //create HTTP server
-const io = socketIo(server);
+const io = socketIo(server, {
+  cors: {
+    origin: "http://localhost:8080",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Authorization"],
+    credentials: true,
+  },
+});
 
 // setup client instance
 const redisCli = redis.createClient(); // creat Redis Client
@@ -21,8 +29,10 @@ const SESSION_SECRET = "foobarbaz"; // placeholder key
 // configure session middleware
 app.use(
   session({
-    store: new RedisStore({ client: redisCli }),
     secret: SESSION_SECRET,
+    store: new RedisStore({
+      client: redisCli,
+    }),
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false },
@@ -31,11 +41,12 @@ app.use(
 
 app.use(express.json()); //middleware to parse JSON bodies
 
-// define mongoose Schemas and models
-mongoose.connect("mongodb://localhost/chatapp", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+app.use(express.static(path.join(__dirname, "public")));
+
+mongoose
+  .connect("mongodb://localhost/chatapp")
+  .then(() => console.log("MongoDB connected"))
+  .catch((err) => console.log(`MongoDB Connection Error: ${err}`));
 
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true },
@@ -90,22 +101,43 @@ const authMiddleware = (req, res, next) => {
 
 // Middleware to authenticate socket.io connections
 io.use((socket, next) => {
+  console.log("use works");
   const token = socket.handshake.auth.token; // Get token from handshake
   if (!token) {
+    console.log("bad token");
+
     return next(new Error("Authentication Error"));
   }
   try {
     const decoded = jwt.verify(token, SESSION_SECRET);
     socket.userId = decoded.userId;
+    console.log("good token");
     next();
   } catch (err) {
     next(new Error("authentication Error"));
   }
 });
 
-// socket.io connection error
+// socket.io connection handler
+io.on("connection", (socket) => {
+  console.log("a user connected", socket.userId);
+
+  // handle sendMessage request
+  socket.on("sendMessage", async (message) => {
+    console.log("send message recieved", message);
+    const user = await User.findById(socket.userId); //find user by id
+    const newMessage = new Message({ user: user.username, message }); //create new message instance
+    await newMessage.save(); // save new message to db
+    io.emit("message", { user: user.username, message }); //broadcast message to all clients
+  });
+
+  // handle disconnection
+  socket.on("disconnect", () => {
+    console.log("user disconnected"); //log user disconnection
+  });
+});
 
 // start server
-server.listen(3000, () => {
-  console.log("server is listening on port 3000");
+server.listen(8080, () => {
+  console.log("server is listening on port 8080");
 });

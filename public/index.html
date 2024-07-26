@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>chatapp</title>
+  </head>
+  <body>
+    <input id="message" placeholder="type a message" />
+    <button onclick="sendMessage()">Send</button>
+    <ul id="messages"></ul>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      // initialize socket.io web connection
+      const socket = io("http://localhost:8080", {
+        auth: {
+          token: "foobarbaz",
+        },
+      });
+
+      // listen for messages from server
+      socket.on("message", (msg) => {
+        console.log("socket on", msg);
+        const li = document.createElement("li"); //create new list item
+        li.innerText = `${msg.user}: ${msg.message}`; //set text content
+        document.getElementById("messages").appendChild(li); //append to message list
+      });
+
+      //send message
+      function sendMessage() {
+        console.log("send message");
+        const message = document.getElementById("message").value; //get message from input
+        socket.emit("sendMessage", message); // emit sendMessage event
+        document.getElementById("message").value = ""; // clear input
+      }
+    </script>
+  </body>
+</html>
